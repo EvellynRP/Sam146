@@ -78,6 +78,13 @@ const GerenciarVideos: React.FC = () => {
     if (selectedFolder) {
       loadVideos();
       loadFolderInfo(selectedFolder);
+      
+      // Sincronização automática em background
+      const autoSyncTimeout = setTimeout(() => {
+        syncFolder(selectedFolder);
+      }, 2000);
+      
+      return () => clearTimeout(autoSyncTimeout);
     }
   }, [selectedFolder]);
 
@@ -296,8 +303,6 @@ const GerenciarVideos: React.FC = () => {
     try {
       const token = await getToken();
       
-      console.log(`🔄 Iniciando sincronização completa da pasta ${folderId}...`);
-      
       // Primeiro sincronizar com banco de dados
       const syncResponse = await fetch(`/api/videos-ssh/sync-database`, {
         method: 'POST',
@@ -310,12 +315,12 @@ const GerenciarVideos: React.FC = () => {
       
       if (syncResponse.ok) {
         const syncData = await syncResponse.json();
-        console.log('📊 Resultado da sincronização:', syncData);
         
         if (syncData.success) {
-          toast.success(`Sincronização: ${syncData.videos_count} vídeos no banco, ${syncData.server_videos_count} no servidor`);
+          // Sincronização silenciosa - apenas log no console
+          console.log(`📊 Sincronização automática: ${syncData.videos_count} vídeos`);
         } else {
-          toast.warning('Sincronização parcial: ' + syncData.message);
+          console.warn('Sincronização parcial:', syncData.message);
         }
       }
       
@@ -330,17 +335,15 @@ const GerenciarVideos: React.FC = () => {
 
       if (response.ok) {
         const folderSyncData = await response.json();
-        console.log('📁 Resultado da sincronização da pasta:', folderSyncData);
         
         loadFolderInfo(folderId);
         loadVideos(); // Recarregar vídeos após sincronização
       } else {
         const errorData = await response.json();
-        toast.error(errorData.error || 'Erro ao sincronizar pasta');
+        console.warn('Erro na sincronização da pasta:', errorData.error);
       }
     } catch (error) {
       console.error('Erro ao sincronizar pasta:', error);
-      toast.error('Erro ao sincronizar pasta');
     }
   };
 
@@ -629,10 +632,14 @@ const GerenciarVideos: React.FC = () => {
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
-                      syncFolder(folder.id.toString());
+                      // Sincronização manual apenas se necessário
+                      if (!folder.server_info?.exists) {
+                        syncFolder(folder.id.toString());
+                        toast.info('Criando pasta no servidor...');
+                      }
                     }}
                     className="text-green-600 hover:text-green-800 p-1"
-                    title="Sincronizar com servidor"
+                    title="Criar pasta no servidor"
                   >
                     <RefreshCw className="h-3 w-3" />
                   </button>
@@ -705,14 +712,6 @@ const GerenciarVideos: React.FC = () => {
             </div>
             <div className="flex items-center space-x-3">
               <button
-                onClick={() => syncFolder(selectedFolder)}
-                className="text-blue-600 hover:text-blue-800 flex items-center text-sm"
-                title="Sincronizar com servidor"
-              >
-                <RefreshCw className="h-4 w-4 mr-1" />
-                Sincronizar
-              </button>
-              <button
                 onClick={loadVideos}
                 disabled={loading}
                 className="text-primary-600 hover:text-primary-800"
@@ -774,15 +773,8 @@ const GerenciarVideos: React.FC = () => {
               <p className="text-sm mb-4">Faça upload de vídeos ou sincronize com o servidor</p>
               {selectedFolder && (
                 <div className="space-y-2">
-                  <button
-                    onClick={() => syncFolder(selectedFolder)}
-                    className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 flex items-center mx-auto"
-                  >
-                    <RefreshCw className="h-4 w-4 mr-2" />
-                    Sincronizar com Servidor
-                  </button>
                   <p className="text-xs text-gray-500">
-                    Clique para verificar se há vídeos no servidor que não estão aparecendo
+                    A sincronização com o servidor é feita automaticamente
                   </p>
                 </div>
               )}
@@ -908,82 +900,18 @@ const GerenciarVideos: React.FC = () => {
             </div>
           )}
 
-          {/* Informações da pasta selecionada */}
-          {selectedFolderData && (
-            <div className="mt-6 p-4 bg-gray-50 rounded-lg">
-              <h3 className="font-medium text-gray-800 mb-2">Informações da Pasta</h3>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+          {/* Sincronização automática em background */}
+          {selectedFolderData && !selectedFolderData.server_info?.exists && (
+            <div className="mt-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+              <div className="flex items-center">
+                <AlertCircle className="h-5 w-5 text-yellow-600 mr-3" />
                 <div>
-                  <span className="text-gray-600">Vídeos no banco:</span>
-                  <span className="ml-2 font-medium">{selectedFolderData.video_count_db || 0}</span>
-                </div>
-                {selectedFolderData.server_info && (
-                  <div>
-                    <span className="text-gray-600">Arquivos no servidor:</span>
-                    <span className={`ml-2 font-medium ${selectedFolderData.server_info.exists ? 'text-green-600' : 'text-red-600'
-                      }`}>
-                      {selectedFolderData.server_info.exists ? selectedFolderData.server_info.file_count : 'Pasta não existe'}
-                    </span>
-                  </div>
-                )}
-                <div>
-                  <span className="text-gray-600">Espaço usado:</span>
-                  <span className="ml-2 font-medium">
-                    {selectedFolderData.espaco_usado || 0} MB
-                  </span>
-                </div>
-              </div>
-
-              {selectedFolderData.server_info?.path && (
-                <div className="mt-2 text-xs text-gray-500">
-                  <span>Caminho no servidor:</span>
-                  <span className="ml-2 font-mono">{selectedFolderData.server_info.path}</span>
-                </div>
-              )}
-              
-              {selectedFolderData.server_info && !selectedFolderData.server_info.exists && (
-                <div className="mt-3 p-3 bg-yellow-50 border border-yellow-200 rounded-md">
-                  <div className="flex items-center justify-between">
-                    <p className="text-yellow-800 text-sm">
-                      ⚠️ Pasta não existe no servidor. Clique em "Sincronizar" para criar.
-                    </p>
-                    <button
-                      onClick={() => syncFolder(selectedFolder)}
-                      className="bg-yellow-600 text-white px-3 py-1 rounded text-xs hover:bg-yellow-700"
-                    >
-                      Sincronizar Agora
-                    </button>
-                  </div>
-                </div>
-              )}
-              
-              {/* Botão de debug para forçar sincronização */}
-              <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-md">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-blue-800 text-sm font-medium">🔧 Ferramentas de Debug</p>
-                    <p className="text-blue-700 text-xs">Use se os vídeos não estão aparecendo corretamente</p>
-                  </div>
-                  <div className="flex space-x-2">
-                    <button
-                      onClick={() => {
-                        console.log('🔄 Forçando sincronização completa...');
-                        syncFolder(selectedFolder);
-                      }}
-                      className="bg-blue-600 text-white px-3 py-1 rounded text-xs hover:bg-blue-700"
-                    >
-                      Forçar Sincronização
-                    </button>
-                    <button
-                      onClick={() => {
-                        console.log('🔄 Recarregando vídeos...');
-                        loadVideos();
-                      }}
-                      className="bg-green-600 text-white px-3 py-1 rounded text-xs hover:bg-green-700"
-                    >
-                      Recarregar Lista
-                    </button>
-                  </div>
+                  <p className="text-yellow-800 text-sm font-medium">
+                    Sincronizando pasta com o servidor...
+                  </p>
+                  <p className="text-yellow-700 text-xs">
+                    A pasta será criada automaticamente no servidor
+                  </p>
                 </div>
               </div>
             </div>
